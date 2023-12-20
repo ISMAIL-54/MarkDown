@@ -1,17 +1,25 @@
 package main
+
 import (
-    "fyne.io/fyne/v2"
-    "fyne.io/fyne/v2/app"
-    "fyne.io/fyne/v2/widget"
-    "fyne.io/fyne/v2/container"
+	"io"
+    "strings"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/widget"
 )
 
 type config struct {
     EditWidget *widget.Entry
     PreviewWidget *widget.RichText
+    SaveMenuItem *fyne.MenuItem
+    CurrentFile fyne.URI
 }
 
 var conf config
+var filter = storage.NewExtensionFileFilter([]string{".md", ".MD"})
 
 func main(){
     // create an app
@@ -44,10 +52,69 @@ func (app *config) makeUI() (*widget.Entry, *widget.RichText) {
 }
 
 func (app *config) createMenuItems(w fyne.Window) {
-    openMenuItem := fyne.NewMenuItem("Open", func(){})
+    openMenuItem := fyne.NewMenuItem("Open", app.openFunc(w)) 
     saveMenuItem := fyne.NewMenuItem("Save", func(){})
-    saveAsMenuItem := fyne.NewMenuItem("Save as", func(){})
+    app.SaveMenuItem = saveMenuItem
+    app.SaveMenuItem.Disabled = true
+    saveAsMenuItem := fyne.NewMenuItem("Save as", app.saveAsFunc(w))
     fileMenu := fyne.NewMenu("File", openMenuItem, saveMenuItem, saveAsMenuItem)
     menu := fyne.NewMainMenu(fileMenu)
     w.SetMainMenu(menu)
 }
+
+func (app *config) saveAsFunc(w fyne.Window) func() {
+    return func() {
+        saveDialog := dialog.NewFileSave(func(write fyne.URIWriteCloser, err error) {
+            if err != nil {
+                dialog.ShowError(err, w)
+                return
+            }
+
+            if write == nil {
+                return
+            }
+            
+            if !strings.HasSuffix(strings.ToLower(write.URI().Name()), ".md") {
+                dialog.ShowInformation("Error", "The name of the file must end with .md extension!", w)
+                return
+            }
+            write.Write([]byte(app.EditWidget.Text))
+            app.CurrentFile = write.URI()
+            defer write.Close()
+            w.SetTitle(w.Title() + " - " + write.URI().Name())
+            app.SaveMenuItem.Disabled = false
+        }, w)
+        saveDialog.SetFileName("untitled.md")
+        saveDialog.SetFilter(filter)
+        saveDialog.Show()
+    }
+}
+
+
+func (app *config) openFunc(w fyne.Window) func() {
+    return func(){
+        openDialog := dialog.NewFileOpen(func(read fyne.URIReadCloser, err error) {
+            if err != nil {
+                dialog.ShowError(err, w)
+                return
+            }
+
+            if read == nil {
+                return
+            }
+            
+            data, err := io.ReadAll(read)
+            if err != nil {
+                dialog.ShowError(err, w)
+                return
+            }
+
+            app.EditWidget.SetText(string(data))
+            app.CurrentFile = read.URI()
+            w.SetTitle(w.Title() + " - " + read.URI().Name())
+        }, w)
+        openDialog.SetFilter(filter)
+        openDialog.Show()
+    }
+}
+
